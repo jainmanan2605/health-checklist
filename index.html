@@ -101,6 +101,25 @@
     padding: 4px 8px; border-radius: 6px;
   }
   .habit-row .del:hover { color: var(--danger); background: #fbeaea; }
+  .habit-row { flex-wrap: wrap; }
+  .habit-row .name-line { display: flex; align-items: center; gap: 10px; width: 100%; }
+  .freq-line { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; flex-wrap: wrap; }
+  .freq-select, .freq-num {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+    font-size: 12px; padding: 5px 8px; color: var(--text); outline: none;
+  }
+  .freq-num { width: 52px; }
+  .day-toggles { display: flex; gap: 4px; }
+  .day-btn {
+    width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); font-size: 11px; cursor: pointer; color: var(--muted);
+  }
+  .day-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .wk-badge {
+    font-size: 11px; background: var(--accent-light); color: var(--accent);
+    border-radius: 99px; padding: 3px 8px; white-space: nowrap; font-weight: 600;
+  }
+  .wk-badge.met { background: var(--accent); color: #fff; }
   .add-row { display: flex; gap: 8px; margin-top: 12px; }
   .add-row input, .setup-input {
     flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
@@ -250,7 +269,8 @@
       <input type="text" id="newHabitInput" placeholder="Add a new habit…" onkeydown="if(event.key==='Enter')addHabit()">
       <button class="btn-primary" onclick="addHabit()">Add</button>
     </div>
-    <p class="hint">Rename habits by typing directly in the box. Deleting a habit keeps its past history in old reports.</p>
+    <div class="freq-line" id="newFreqLine"></div>
+    <p class="hint">Rename habits by typing directly in the box. Each habit can be daily, a weekly target (e.g. 3×/week), or tied to specific weekdays. Deleting a habit keeps its past history in old reports.</p>
     <div style="margin-top:24px">
       <button class="btn-secondary" onclick="disconnect()">Disconnect GitHub on this device</button>
     </div>
@@ -430,6 +450,26 @@ function showView(v) {
 function activeHabitsOn(dateStr) {
   return state.habits.filter(h => h.created <= dateStr && (!h.deleted || h.deleted > dateStr));
 }
+const DAY_LABELS = ['S','M','T','W','T','F','S'];
+function getFreq(h) { return h.freq || { type: 'daily' }; }
+function visibleOn(h, dateObj) {
+  const f = getFreq(h);
+  if (f.type === 'days') return (f.days || []).includes(dateObj.getDay());
+  return true;
+}
+function parseDateStr(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function weekStartStr(d) { // Monday-start week
+  const x = new Date(d); const dow = (x.getDay() + 6) % 7; x.setDate(x.getDate() - dow); return fmt(x);
+}
+function weekChecks(h, anyDateInWeek) {
+  const start = parseDateStr(weekStartStr(anyDateInWeek));
+  let n = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i);
+    if (isChecked(fmt(d), h.id)) n++;
+  }
+  return n;
+}
 function isChecked(dateStr, id) { return (state.checks[dateStr] || []).includes(id); }
 function toggle(dateStr, id) {
   const arr = state.checks[dateStr] || (state.checks[dateStr] = []);
@@ -438,11 +478,18 @@ function toggle(dateStr, id) {
   if (!arr.length) delete state.checks[dateStr];
   persist(); renderToday();
 }
-function streak(id) {
-  let count = 0;
-  let d = new Date();
-  if (!isChecked(fmt(d), id)) d.setDate(d.getDate() - 1);
-  while (isChecked(fmt(d), id)) { count++; d.setDate(d.getDate() - 1); }
+function streak(h) {
+  const f = getFreq(h);
+  if (f.type === 'weekly') return 0; // weekly habits show a week badge instead
+  const sched = dt => f.type !== 'days' || (f.days || []).includes(dt.getDay());
+  let d = new Date(), count = 0;
+  if (sched(d) && !isChecked(fmt(d), h.id)) d.setDate(d.getDate() - 1); // today pending doesn't break it
+  for (let i = 0; i < 730; i++) {
+    if (sched(d)) {
+      if (isChecked(fmt(d), h.id)) count++; else break;
+    }
+    d.setDate(d.getDate() - 1);
+  }
   return count;
 }
 
@@ -455,17 +502,24 @@ function renderToday() {
     + '<small>' + (isToday ? 'Today' : 'Editing a past day') + '</small>';
   document.getElementById('nextDay').disabled = isToday;
 
-  const habits = activeHabitsOn(ds);
+  const habits = activeHabitsOn(ds).filter(h => visibleOn(h, viewDate));
   const list = document.getElementById('taskList');
   list.innerHTML = '';
   habits.forEach(h => {
     const done = isChecked(ds, h.id);
+    const f = getFreq(h);
     const el = document.createElement('div');
     el.className = 'task' + (done ? ' done' : '');
-    const st = streak(h.id);
+    let extra = '';
+    if (f.type === 'weekly') {
+      const wk = weekChecks(h, viewDate);
+      extra = '<div class="wk-badge' + (wk >= f.target ? ' met' : '') + '">' + wk + '/' + f.target + ' this week</div>';
+    } else {
+      const st = streak(h);
+      if (st >= 2) extra = '<div class="streak">🔥 ' + st + (f.type === 'days' ? '×' : 'd') + '</div>';
+    }
     el.innerHTML = '<div class="checkbox">' + (done ? '✓' : '') + '</div>'
-      + '<div class="name"></div>'
-      + (st >= 2 ? '<div class="streak">🔥 ' + st + 'd</div>' : '');
+      + '<div class="name"></div>' + extra;
     el.querySelector('.name').textContent = h.name;
     el.onclick = () => toggle(ds, h.id);
     list.appendChild(el);
@@ -485,12 +539,74 @@ function changeDay(delta) {
 }
 
 // ================= MANAGE =================
+function buildFreqControls(freq, onChange) {
+  // freq: {type:'daily'} | {type:'weekly',target:n} | {type:'days',days:[0-6]}
+  const wrap = document.createElement('div');
+  wrap.className = 'freq-line';
+  const sel = document.createElement('select');
+  sel.className = 'freq-select';
+  [['daily','Every day'],['weekly','Times per week'],['days','Specific days']].forEach(([v,l]) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = l; sel.appendChild(o);
+  });
+  sel.value = freq.type;
+  wrap.appendChild(sel);
+
+  const detail = document.createElement('span');
+  detail.style.display = 'contents';
+  wrap.appendChild(detail);
+
+  function renderDetail() {
+    detail.innerHTML = '';
+    if (sel.value === 'weekly') {
+      const num = document.createElement('input');
+      num.type = 'number'; num.min = 1; num.max = 7; num.className = 'freq-num';
+      num.value = freq.type === 'weekly' ? freq.target : 3;
+      num.onchange = emit;
+      detail.appendChild(num);
+      const lbl = document.createElement('span');
+      lbl.style.cssText = 'font-size:12px;color:var(--muted)';
+      lbl.textContent = '× per week';
+      detail.appendChild(lbl);
+    } else if (sel.value === 'days') {
+      const dt = document.createElement('div');
+      dt.className = 'day-toggles';
+      const current = freq.type === 'days' ? freq.days : [];
+      DAY_LABELS.forEach((l, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'day-btn' + (current.includes(i) ? ' on' : '');
+        b.textContent = l;
+        b.onclick = () => { b.classList.toggle('on'); emit(); };
+        dt.appendChild(b);
+      });
+      detail.appendChild(dt);
+    }
+  }
+  function emit() {
+    let f;
+    if (sel.value === 'weekly') {
+      const n = Math.min(7, Math.max(1, parseInt(detail.querySelector('.freq-num').value) || 3));
+      f = { type: 'weekly', target: n };
+    } else if (sel.value === 'days') {
+      const days = [...detail.querySelectorAll('.day-btn')].map((b, i) => b.classList.contains('on') ? i : -1).filter(i => i >= 0);
+      f = days.length ? { type: 'days', days } : { type: 'daily' };
+    } else f = { type: 'daily' };
+    freq = f;
+    onChange(f);
+  }
+  sel.onchange = () => { renderDetail(); emit(); };
+  renderDetail();
+  return wrap;
+}
+
 function renderManage() {
   const box = document.getElementById('habitEditor');
   box.innerHTML = '';
   state.habits.filter(h => !h.deleted).forEach(h => {
     const row = document.createElement('div');
     row.className = 'habit-row';
+    const line = document.createElement('div');
+    line.className = 'name-line';
     const inp = document.createElement('input');
     inp.type = 'text'; inp.value = h.name;
     inp.onchange = () => { h.name = inp.value.trim() || h.name; inp.value = h.name; persist(); };
@@ -501,17 +617,28 @@ function renderManage() {
         h.deleted = todayStr(); persist(); renderManage();
       }
     };
-    row.appendChild(inp); row.appendChild(del);
+    line.appendChild(inp); line.appendChild(del);
+    row.appendChild(line);
+    row.appendChild(buildFreqControls(getFreq(h), f => { h.freq = f.type === 'daily' ? null : f; persist(); }));
     box.appendChild(row);
   });
   if (!state.habits.filter(h => !h.deleted).length)
     box.innerHTML = '<div class="empty">No habits yet.</div>';
+  // frequency picker for the add-new row
+  const nf = document.getElementById('newFreqLine');
+  nf.innerHTML = '';
+  newHabitFreq = { type: 'daily' };
+  nf.appendChild(buildFreqControls(newHabitFreq, f => { newHabitFreq = f; }));
 }
+let newHabitFreq = { type: 'daily' };
 function addHabit() {
   const inp = document.getElementById('newHabitInput');
   const name = inp.value.trim();
   if (!name) return;
-  state.habits.push({ id: uid(), name, created: todayStr(), deleted: null });
+  state.habits.push({
+    id: uid(), name, created: todayStr(), deleted: null,
+    freq: newHabitFreq.type === 'daily' ? null : newHabitFreq
+  });
   inp.value = '';
   persist(); renderManage();
 }
@@ -526,15 +653,35 @@ function monthStats(year, month) {
 
   const perHabit = [];
   state.habits.forEach(h => {
-    let total = 0, done = 0;
+    const f = getFreq(h);
+    let activeDays = 0, scheduledDays = 0, doneScheduled = 0, doneAny = 0;
     for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
       const ds = fmt(d);
       if (h.created <= ds && (!h.deleted || h.deleted > ds)) {
-        total++;
-        if (isChecked(ds, h.id)) done++;
+        activeDays++;
+        if (isChecked(ds, h.id)) doneAny++;
+        if (visibleOn(h, d)) {
+          scheduledDays++;
+          if (isChecked(ds, h.id)) doneScheduled++;
+        }
       }
     }
-    if (total > 0) perHabit.push({ name: h.name, done, total, pct: Math.round(done / total * 100) });
+    if (!activeDays) return;
+    let pct, note;
+    if (f.type === 'weekly') {
+      const expected = f.target * activeDays / 7;
+      if (expected <= 0) return;
+      pct = Math.min(100, Math.round(doneAny / expected * 100));
+      note = doneAny + ' of ~' + Math.round(expected) + ' (target ' + f.target + '×/week)';
+    } else if (f.type === 'days') {
+      if (!scheduledDays) return;
+      pct = Math.round(doneScheduled / scheduledDays * 100);
+      note = doneScheduled + ' of ' + scheduledDays + ' scheduled days';
+    } else {
+      pct = Math.round(doneScheduled / scheduledDays * 100);
+      note = doneScheduled + ' of ' + scheduledDays + ' days';
+    }
+    perHabit.push({ name: h.name, pct, note });
   });
   const daysCounted = Math.round((end - first) / 86400000) + 1;
   return { perHabit, daysCounted };
@@ -568,9 +715,10 @@ function renderReport() {
   const lastDay = new Date(y, m + 1, 0).getDate();
   html += '<div class="heat">';
   for (let day = 1; day <= lastDay; day++) {
-    const ds = fmt(new Date(y, m, day));
+    const dObj = new Date(y, m, day);
+    const ds = fmt(dObj);
     if (ds > todayStr()) { html += '<div class="cell">' + day + '</div>'; continue; }
-    const hs = activeHabitsOn(ds);
+    const hs = activeHabitsOn(ds).filter(h => visibleOn(h, dObj));
     const dn = hs.filter(h => isChecked(ds, h.id)).length;
     const r = hs.length ? dn / hs.length : 0;
     const cls = r === 0 ? '' : r < 0.5 ? 'l1' : r < 1 ? 'l2' : 'l3';
@@ -585,7 +733,7 @@ function renderReport() {
       + '<span class="rname">' + esc(h.name) + '</span>'
       + '<span class="rpct ' + cls + '">' + h.pct + '%</span></div>'
       + '<div class="bar"><div class="bg-' + cls + '" style="width:' + h.pct + '%"></div></div>'
-      + '<div class="note">' + h.done + ' of ' + h.total + ' days</div></div>';
+      + '<div class="note">' + h.note + '</div></div>';
   });
 
   const weak = sorted.filter(h => h.pct < BENCHMARK);
