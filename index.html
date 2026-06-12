@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Health Checklist</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #8a8a85;
+    --accent: #2e9e6b;
+    --accent-light: #e6f4ed;
+    --danger: #d9534f;
+    --warn: #e8a13c;
+    --border: #ececea;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 24px 16px 60px;
+  }
+  .container { max-width: 560px; margin: 0 auto; }
+
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .header-btns { display: flex; gap: 8px; }
+  .icon-btn {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; cursor: pointer; font-size: 14px; color: var(--text);
+    transition: background .15s;
+  }
+  .icon-btn:hover { background: var(--accent-light); }
+  .icon-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .sync-status { font-size: 12px; color: var(--muted); margin-bottom: 14px; min-height: 16px; }
+  .sync-status.err { color: var(--danger); }
+  .sync-status.ok { color: var(--accent); }
+
+  /* Date nav */
+  .date-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 12px; margin-bottom: 14px;
+  }
+  .date-nav button {
+    background: none; border: none; font-size: 18px; cursor: pointer; color: var(--muted);
+    padding: 4px 10px; border-radius: 8px;
+  }
+  .date-nav button:hover:not(:disabled) { background: var(--accent-light); color: var(--accent); }
+  .date-nav button:disabled { opacity: 0.25; cursor: default; }
+  .date-label { font-weight: 600; font-size: 15px; text-align: center; }
+  .date-label small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  /* Progress */
+  .progress-wrap { margin-bottom: 18px; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; width: 0; }
+  .progress-text { font-size: 12px; color: var(--muted); margin-top: 6px; text-align: right; }
+
+  /* Checklist */
+  .task {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 8px; cursor: pointer;
+    transition: border-color .15s, opacity .2s; user-select: none;
+  }
+  .task:hover { border-color: var(--accent); }
+  .task .checkbox {
+    width: 24px; height: 24px; min-width: 24px; border-radius: 8px;
+    border: 2px solid #d4d4d0; display: flex; align-items: center; justify-content: center;
+    transition: all .15s; font-size: 14px; color: #fff;
+  }
+  .task.done .checkbox { background: var(--accent); border-color: var(--accent); }
+  .task .name { font-size: 15px; flex: 1; }
+  .task.done .name { color: var(--muted); text-decoration: line-through; }
+  .task .streak { font-size: 12px; color: var(--warn); white-space: nowrap; }
+
+  .all-done { text-align: center; padding: 14px; color: var(--accent); font-weight: 600; font-size: 14px; display: none; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; font-size: 14px; }
+
+  .view { display: none; }
+  .view.visible { display: block; }
+  h2 { font-size: 16px; margin-bottom: 12px; }
+
+  /* Manage habits */
+  .habit-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 8px;
+  }
+  .habit-row input[type=text] {
+    flex: 1; border: none; font-size: 15px; background: transparent; color: var(--text);
+    outline: none; padding: 4px 0;
+  }
+  .habit-row .del {
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px;
+    padding: 4px 8px; border-radius: 6px;
+  }
+  .habit-row .del:hover { color: var(--danger); background: #fbeaea; }
+  .add-row { display: flex; gap: 8px; margin-top: 12px; }
+  .add-row input, .setup-input {
+    flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+    font-size: 15px; background: var(--card); outline: none; width: 100%;
+  }
+  .add-row input:focus, .setup-input:focus { border-color: var(--accent); }
+  .btn-primary {
+    background: var(--accent); color: #fff; border: none; border-radius: 10px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-secondary {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 16px; font-size: 14px; cursor: pointer; color: var(--text);
+  }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
+  /* Setup card */
+  .setup-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; line-height: 1.6; font-size: 14px;
+  }
+  .setup-card ol { margin: 12px 0 16px 20px; }
+  .setup-card li { margin-bottom: 8px; }
+  .setup-card a { color: var(--accent); }
+  .setup-card code { background: var(--bg); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+  .setup-err { color: var(--danger); font-size: 13px; margin-top: 10px; display: none; }
+
+  /* Report */
+  .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .month-nav button {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 14px;
+  }
+  .month-nav button:disabled { opacity: 0.25; cursor: default; }
+  .month-title { font-weight: 600; font-size: 15px; }
+
+  .report-summary {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px; margin-bottom: 14px; text-align: center;
+  }
+  .big-pct { font-size: 42px; font-weight: 700; color: var(--accent); }
+  .report-summary .label { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .report-grade { font-size: 14px; margin-top: 8px; font-weight: 500; }
+
+  .report-item {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 8px;
+  }
+  .report-item .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .report-item .rname { font-size: 14px; font-weight: 500; }
+  .report-item .rpct { font-size: 14px; font-weight: 700; }
+  .report-item .bar { height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .report-item .bar > div { height: 100%; border-radius: 99px; }
+  .report-item .note { font-size: 12px; margin-top: 6px; color: var(--muted); }
+  .good { color: var(--accent); } .bg-good { background: var(--accent); }
+  .ok { color: var(--warn); } .bg-ok { background: var(--warn); }
+  .bad { color: var(--danger); } .bg-bad { background: var(--danger); }
+
+  .improve-box {
+    background: #fdf6ec; border: 1px solid #f3e2c4; border-radius: var(--radius);
+    padding: 14px 16px; margin-top: 14px; font-size: 14px; line-height: 1.6;
+  }
+  .improve-box strong { display: block; margin-bottom: 4px; }
+
+  .banner {
+    background: var(--accent-light); border: 1px solid #c8e6d6; border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 16px; font-size: 14px; display: none;
+    cursor: pointer; line-height: 1.5;
+  }
+  .banner:hover { border-color: var(--accent); }
+
+  .heat { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 18px; }
+  .heat .cell {
+    width: 22px; height: 22px; border-radius: 6px; background: var(--border);
+    font-size: 9px; color: var(--muted); display: flex; align-items: center; justify-content: center;
+  }
+  .heat .cell.l1 { background: #cdeadb; } .heat .cell.l2 { background: #8fd0ae; color:#fff; }
+  .heat .cell.l3 { background: var(--accent); color: #fff; }
+  .heat .cell.today-cell { outline: 2px solid var(--text); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🌱 Daily Health</h1>
+    <div class="header-btns" id="headerBtns" style="display:none">
+      <button class="icon-btn" id="navToday" onclick="showView('today')">Today</button>
+      <button class="icon-btn" id="navReport" onclick="showView('report')">Report</button>
+      <button class="icon-btn" id="navManage" onclick="showView('manage')">Edit</button>
+    </div>
+  </header>
+  <div class="sync-status" id="syncStatus"></div>
+
+  <div class="banner" id="monthBanner" onclick="openLastMonthReport()"></div>
+
+  <!-- SETUP VIEW -->
+  <div class="view" id="view-setup">
+    <div class="setup-card">
+      <h2>Connect your GitHub account</h2>
+      <p>Your check-ins are stored in a <strong>private GitHub Gist</strong> in your account, so they sync across all your devices. One-time setup per device:</p>
+      <ol>
+        <li>Open <a href="https://github.com/settings/tokens/new?scopes=gist&description=Health%20Checklist" target="_blank">github.com/settings/tokens/new</a> (pre-filled for you)</li>
+        <li>Set expiration to <code>No expiration</code> (or your preference)</li>
+        <li>Make sure only the <code>gist</code> scope is ticked</li>
+        <li>Click <strong>Generate token</strong> and copy it</li>
+      </ol>
+      <input type="password" class="setup-input" id="tokenInput" placeholder="Paste your token (ghp_…)" onkeydown="if(event.key==='Enter')connectGitHub()">
+      <div class="setup-err" id="setupErr"></div>
+      <div style="margin-top:14px; display:flex; gap:8px;">
+        <button class="btn-primary" onclick="connectGitHub()">Connect</button>
+      </div>
+      <p class="hint">The token is kept only in this browser and is used solely to read/write one private gist. It cannot touch your repositories.</p>
+    </div>
+  </div>
+
+  <!-- TODAY VIEW -->
+  <div class="view" id="view-today">
+    <div class="date-nav">
+      <button id="prevDay" onclick="changeDay(-1)">‹</button>
+      <div class="date-label" id="dateLabel"></div>
+      <button id="nextDay" onclick="changeDay(1)">›</button>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
+    <div id="taskList"></div>
+    <div class="all-done" id="allDone">✨ All done — great job!</div>
+  </div>
+
+  <!-- REPORT VIEW -->
+  <div class="view" id="view-report">
+    <div class="month-nav">
+      <button onclick="changeMonth(-1)">‹ Prev</button>
+      <div class="month-title" id="monthTitle"></div>
+      <button id="nextMonth" onclick="changeMonth(1)">Next ›</button>
+    </div>
+    <div id="reportBody"></div>
+  </div>
+
+  <!-- MANAGE VIEW -->
+  <div class="view" id="view-manage">
+    <h2>Your habits</h2>
+    <div id="habitEditor"></div>
+    <div class="add-row">
+      <input type="text" id="newHabitInput" placeholder="Add a new habit…" onkeydown="if(event.key==='Enter')addHabit()">
+      <button class="btn-primary" onclick="addHabit()">Add</button>
+    </div>
+    <p class="hint">Rename habits by typing directly in the box. Deleting a habit keeps its past history in old reports.</p>
+    <div style="margin-top:24px">
+      <button class="btn-secondary" onclick="disconnect()">Disconnect GitHub on this device</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ================= CONFIG =================
+const BENCHMARK = 80;                       // % below which a habit is flagged
+const GIST_FILENAME = 'health-checklist-data.json';
+const GIST_DESC = 'Daily Health Checklist data (auto-managed)';
+const LS_TOKEN = 'healthChecklist.token';
+const LS_GIST = 'healthChecklist.gistId';
+const LS_CACHE = 'healthChecklist.cache.v2';
+const DEFAULT_HABITS = [
+  'Apply minoxidil', 'Vitamin D supplement', 'Vitamin B12 supplement',
+  'Exercise', 'Eat protein', 'Eat chia', 'Sleep before 10:30 PM'
+];
+
+// ================= STATE =================
+let state = null;
+let token = localStorage.getItem(LS_TOKEN);
+let gistId = localStorage.getItem(LS_GIST);
+let pushTimer = null;
+let currentView = 'today';
+
+function freshState() {
+  return {
+    habits: DEFAULT_HABITS.map(n => ({ id: uid(), name: n, created: todayStr(), deleted: null })),
+    checks: {},
+    lastSeenReport: monthStr(new Date()),
+    updatedAt: Date.now()
+  };
+}
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function cacheSave() { try { localStorage.setItem(LS_CACHE, JSON.stringify(state)); } catch(e) {} }
+function cacheLoad() {
+  try { const s = JSON.parse(localStorage.getItem(LS_CACHE)); if (s && s.habits) return s; } catch(e) {}
+  return null;
+}
+
+// ================= GITHUB SYNC =================
+function gh(path, opts = {}) {
+  return fetch('https://api.github.com' + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'Accept': 'application/vnd.github+json',
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {})
+    }
+  });
+}
+function setStatus(msg, cls) {
+  const el = document.getElementById('syncStatus');
+  el.textContent = msg; el.className = 'sync-status ' + (cls || '');
+}
+
+async function findOrCreateGist() {
+  // look through user's gists for our file
+  for (let page = 1; page <= 3; page++) {
+    const r = await gh('/gists?per_page=100&page=' + page);
+    if (!r.ok) throw new Error('gist list failed: ' + r.status);
+    const gists = await r.json();
+    const hit = gists.find(g => g.files && g.files[GIST_FILENAME]);
+    if (hit) return hit.id;
+    if (gists.length < 100) break;
+  }
+  // none found — create
+  const r = await gh('/gists', {
+    method: 'POST',
+    body: JSON.stringify({
+      description: GIST_DESC, public: false,
+      files: { [GIST_FILENAME]: { content: JSON.stringify(freshState()) } }
+    })
+  });
+  if (!r.ok) throw new Error('gist create failed: ' + r.status);
+  return (await r.json()).id;
+}
+
+async function pullRemote() {
+  const r = await gh('/gists/' + gistId);
+  if (r.status === 404) { gistId = null; localStorage.removeItem(LS_GIST); throw new Error('gist missing'); }
+  if (!r.ok) throw new Error('pull failed: ' + r.status);
+  const g = await r.json();
+  const f = g.files[GIST_FILENAME];
+  if (!f) throw new Error('data file missing in gist');
+  let content = f.content;
+  if (f.truncated) content = await (await fetch(f.raw_url)).text();
+  return JSON.parse(content);
+}
+
+function schedulePush() {
+  setStatus('Saving…');
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushRemote, 1200);
+}
+async function pushRemote() {
+  if (!token || !gistId) return;
+  try {
+    const r = await gh('/gists/' + gistId, {
+      method: 'PATCH',
+      body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(state) } } })
+    });
+    if (!r.ok) throw new Error(r.status);
+    setStatus('✓ Synced to GitHub', 'ok');
+  } catch (e) {
+    setStatus('⚠ Offline — changes saved locally, will retry', 'err');
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushRemote, 15000);
+  }
+}
+function persist() {
+  state.updatedAt = Date.now();
+  cacheSave();
+  schedulePush();
+}
+
+async function connectGitHub() {
+  const inp = document.getElementById('tokenInput');
+  const err = document.getElementById('setupErr');
+  const t = inp.value.trim();
+  if (!t) return;
+  err.style.display = 'none';
+  token = t;
+  setStatus('Connecting…');
+  try {
+    const me = await gh('/user');
+    if (me.status === 401) throw new Error('Token rejected — check you copied it fully.');
+    gistId = await findOrCreateGist();
+    const remote = await pullRemote();
+    // merge: prefer newer
+    const local = cacheLoad();
+    state = (local && local.updatedAt > (remote.updatedAt || 0)) ? local : remote;
+    localStorage.setItem(LS_TOKEN, token);
+    localStorage.setItem(LS_GIST, gistId);
+    cacheSave();
+    pushRemote();
+    enterApp();
+  } catch (e) {
+    token = null;
+    err.textContent = e.message || 'Connection failed. Check the token and try again.';
+    err.style.display = 'block';
+    setStatus('');
+  }
+}
+function disconnect() {
+  if (!confirm('Disconnect GitHub on this device? Your data stays safe in your gist.')) return;
+  localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem(LS_GIST);
+  localStorage.removeItem(LS_CACHE);
+  location.reload();
+}
+
+// ================= DATES =================
+function fmt(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function todayStr() { return fmt(new Date()); }
+function monthStr(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+
+let viewDate = new Date();
+let reportMonth = new Date(); reportMonth.setDate(1);
+
+// ================= VIEWS =================
+function showView(v) {
+  currentView = v;
+  document.querySelectorAll('.view').forEach(el => el.classList.remove('visible'));
+  document.getElementById('view-' + v).classList.add('visible');
+  ['Today','Report','Manage'].forEach(n => {
+    const btn = document.getElementById('nav' + n);
+    if (btn) btn.classList.toggle('active', n.toLowerCase() === v || (n === 'Manage' && v === 'manage'));
+  });
+  if (v === 'today') renderToday();
+  if (v === 'report') renderReport();
+  if (v === 'manage') renderManage();
+}
+
+// ================= HABIT HELPERS =================
+function activeHabitsOn(dateStr) {
+  return state.habits.filter(h => h.created <= dateStr && (!h.deleted || h.deleted > dateStr));
+}
+function isChecked(dateStr, id) { return (state.checks[dateStr] || []).includes(id); }
+function toggle(dateStr, id) {
+  const arr = state.checks[dateStr] || (state.checks[dateStr] = []);
+  const i = arr.indexOf(id);
+  if (i >= 0) arr.splice(i, 1); else arr.push(id);
+  if (!arr.length) delete state.checks[dateStr];
+  persist(); renderToday();
+}
+function streak(id) {
+  let count = 0;
+  let d = new Date();
+  if (!isChecked(fmt(d), id)) d.setDate(d.getDate() - 1);
+  while (isChecked(fmt(d), id)) { count++; d.setDate(d.getDate() - 1); }
+  return count;
+}
+
+// ================= TODAY =================
+function renderToday() {
+  const ds = fmt(viewDate);
+  const isToday = ds === todayStr();
+  document.getElementById('dateLabel').innerHTML =
+    viewDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    + '<small>' + (isToday ? 'Today' : 'Editing a past day') + '</small>';
+  document.getElementById('nextDay').disabled = isToday;
+
+  const habits = activeHabitsOn(ds);
+  const list = document.getElementById('taskList');
+  list.innerHTML = '';
+  habits.forEach(h => {
+    const done = isChecked(ds, h.id);
+    const el = document.createElement('div');
+    el.className = 'task' + (done ? ' done' : '');
+    const st = streak(h.id);
+    el.innerHTML = '<div class="checkbox">' + (done ? '✓' : '') + '</div>'
+      + '<div class="name"></div>'
+      + (st >= 2 ? '<div class="streak">🔥 ' + st + 'd</div>' : '');
+    el.querySelector('.name').textContent = h.name;
+    el.onclick = () => toggle(ds, h.id);
+    list.appendChild(el);
+  });
+  if (!habits.length) list.innerHTML = '<div class="empty">No habits yet — add some in Edit.</div>';
+
+  const done = habits.filter(h => isChecked(ds, h.id)).length;
+  const pct = habits.length ? Math.round(done / habits.length * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = done + ' / ' + habits.length + ' done';
+  document.getElementById('allDone').style.display = (habits.length && done === habits.length) ? 'block' : 'none';
+}
+function changeDay(delta) {
+  viewDate.setDate(viewDate.getDate() + delta);
+  if (fmt(viewDate) > todayStr()) viewDate = new Date();
+  renderToday();
+}
+
+// ================= MANAGE =================
+function renderManage() {
+  const box = document.getElementById('habitEditor');
+  box.innerHTML = '';
+  state.habits.filter(h => !h.deleted).forEach(h => {
+    const row = document.createElement('div');
+    row.className = 'habit-row';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = h.name;
+    inp.onchange = () => { h.name = inp.value.trim() || h.name; inp.value = h.name; persist(); };
+    const del = document.createElement('button');
+    del.className = 'del'; del.textContent = '✕'; del.title = 'Remove habit';
+    del.onclick = () => {
+      if (confirm('Remove "' + h.name + '"? Past history stays in old reports.')) {
+        h.deleted = todayStr(); persist(); renderManage();
+      }
+    };
+    row.appendChild(inp); row.appendChild(del);
+    box.appendChild(row);
+  });
+  if (!state.habits.filter(h => !h.deleted).length)
+    box.innerHTML = '<div class="empty">No habits yet.</div>';
+}
+function addHabit() {
+  const inp = document.getElementById('newHabitInput');
+  const name = inp.value.trim();
+  if (!name) return;
+  state.habits.push({ id: uid(), name, created: todayStr(), deleted: null });
+  inp.value = '';
+  persist(); renderManage();
+}
+
+// ================= REPORT =================
+function monthStats(year, month) {
+  const first = new Date(year, month, 1);
+  const today = new Date();
+  const lastDay = new Date(year, month + 1, 0);
+  const end = (fmt(lastDay) >= todayStr()) ? today : lastDay;
+  if (fmt(first) > todayStr()) return null;
+
+  const perHabit = [];
+  state.habits.forEach(h => {
+    let total = 0, done = 0;
+    for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
+      const ds = fmt(d);
+      if (h.created <= ds && (!h.deleted || h.deleted > ds)) {
+        total++;
+        if (isChecked(ds, h.id)) done++;
+      }
+    }
+    if (total > 0) perHabit.push({ name: h.name, done, total, pct: Math.round(done / total * 100) });
+  });
+  const daysCounted = Math.round((end - first) / 86400000) + 1;
+  return { perHabit, daysCounted };
+}
+
+function renderReport() {
+  const y = reportMonth.getFullYear(), m = reportMonth.getMonth();
+  document.getElementById('monthTitle').textContent =
+    reportMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const now = new Date();
+  document.getElementById('nextMonth').disabled = (y === now.getFullYear() && m === now.getMonth());
+
+  const body = document.getElementById('reportBody');
+  const stats = monthStats(y, m);
+  if (!stats || !stats.perHabit.length) {
+    body.innerHTML = '<div class="empty">No data for this month.</div>';
+    return;
+  }
+
+  const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
+  const grade = overall >= 90 ? ['Outstanding consistency! 🏆', 'good']
+              : overall >= BENCHMARK ? ['Solid month — above your ' + BENCHMARK + '% benchmark 💪', 'good']
+              : overall >= 50 ? ['Below your ' + BENCHMARK + '% benchmark — room to grow 🌿', 'ok']
+              : ['Tough month — fresh start ahead 🌅', 'bad'];
+
+  let html = '<div class="report-summary">'
+    + '<div class="big-pct">' + overall + '%</div>'
+    + '<div class="label">overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%</div>'
+    + '<div class="report-grade ' + grade[1] + '">' + grade[0] + '</div></div>';
+
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  html += '<div class="heat">';
+  for (let day = 1; day <= lastDay; day++) {
+    const ds = fmt(new Date(y, m, day));
+    if (ds > todayStr()) { html += '<div class="cell">' + day + '</div>'; continue; }
+    const hs = activeHabitsOn(ds);
+    const dn = hs.filter(h => isChecked(ds, h.id)).length;
+    const r = hs.length ? dn / hs.length : 0;
+    const cls = r === 0 ? '' : r < 0.5 ? 'l1' : r < 1 ? 'l2' : 'l3';
+    html += '<div class="cell ' + cls + (ds === todayStr() ? ' today-cell' : '') + '">' + day + '</div>';
+  }
+  html += '</div>';
+
+  const sorted = [...stats.perHabit].sort((a, b) => b.pct - a.pct);
+  sorted.forEach(h => {
+    const cls = h.pct >= BENCHMARK ? 'good' : h.pct >= 50 ? 'ok' : 'bad';
+    html += '<div class="report-item"><div class="top">'
+      + '<span class="rname">' + esc(h.name) + '</span>'
+      + '<span class="rpct ' + cls + '">' + h.pct + '%</span></div>'
+      + '<div class="bar"><div class="bg-' + cls + '" style="width:' + h.pct + '%"></div></div>'
+      + '<div class="note">' + h.done + ' of ' + h.total + ' days</div></div>';
+  });
+
+  const weak = sorted.filter(h => h.pct < BENCHMARK);
+  if (weak.length) {
+    html += '<div class="improve-box"><strong>⚠️ Below ' + BENCHMARK + '% — needs improvement</strong>'
+      + weak.map(h => esc(h.name) + ' (' + h.pct + '%)').join(', ')
+      + '. Try pairing these with a habit you already do consistently, or set a phone reminder.</div>';
+  } else {
+    html += '<div class="improve-box" style="background:var(--accent-light);border-color:#c8e6d6;"><strong>✅ Nothing flagged</strong>Every habit is at ' + BENCHMARK + '% or above. Excellent work!</div>';
+  }
+  body.innerHTML = html;
+}
+function changeMonth(delta) {
+  reportMonth.setMonth(reportMonth.getMonth() + delta);
+  renderReport();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ================= MONTH-END BANNER =================
+function checkMonthBanner() {
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevKey = monthStr(prev);
+  if (state.lastSeenReport >= prevKey) return;
+  const stats = monthStats(prev.getFullYear(), prev.getMonth());
+  if (!stats || !stats.perHabit.length) return;
+  const b = document.getElementById('monthBanner');
+  b.innerHTML = '📊 <strong>' + prev.toLocaleDateString(undefined,{month:'long'}) + ' is over!</strong> Tap to see your monthly consistency report.';
+  b.style.display = 'block';
+}
+function openLastMonthReport() {
+  const now = new Date();
+  reportMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  state.lastSeenReport = monthStr(reportMonth);
+  persist();
+  document.getElementById('monthBanner').style.display = 'none';
+  showView('report');
+}
+
+// ================= INIT =================
+function enterApp() {
+  document.getElementById('headerBtns').style.display = 'flex';
+  showView('today');
+  checkMonthBanner();
+}
+
+async function init() {
+  if (!token) { showView('setup'); return; }
+  // render instantly from cache, then sync
+  state = cacheLoad() || freshState();
+  enterApp();
+  setStatus('Syncing…');
+  try {
+    if (!gistId) { gistId = await findOrCreateGist(); localStorage.setItem(LS_GIST, gistId); }
+    const remote = await pullRemote();
+    if ((remote.updatedAt || 0) > (state.updatedAt || 0)) {
+      state = remote;
+      cacheSave();
+      showView(currentView);
+      checkMonthBanner();
+    } else if ((state.updatedAt || 0) > (remote.updatedAt || 0)) {
+      pushRemote(); return;
+    }
+    setStatus('✓ Synced to GitHub', 'ok');
+  } catch (e) {
+    if (e.message === 'gist missing') { init(); return; }
+    setStatus('⚠ Offline — working from local copy', 'err');
+  }
+}
+init();
+</script>
+</body>
+</html>
