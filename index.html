@@ -912,8 +912,17 @@ function rangeStats(first, end) {
     const s = habitRangeStats(h, first, end);
     if (s) perHabit.push(s);
   });
-  const daysCounted = Math.round((end - first) / 86400000) + 1;
-  return { perHabit, daysCounted };
+  // Active span = from the first day in the range that any habit existed, not the
+  // calendar start. So a mid-month start counts only your real tracking days.
+  let activeStart = null;
+  for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
+    if (activeHabitsOn(fmt(d)).length) { activeStart = fmt(d); break; }
+  }
+  const spanFrom = activeStart ? parseDateStr(activeStart) : first;
+  const daysCounted = Math.round((end - spanFrom) / 86400000) + 1;
+  // Did tracking begin after the calendar start of this range?
+  const partialStart = activeStart && activeStart > fmt(first);
+  return { perHabit, daysCounted, activeStart, partialStart };
 }
 
 function monthStats(year, month) {
@@ -986,6 +995,18 @@ function renderReport() {
   }
 }
 
+function niceDate(ds) {
+  return parseDateStr(ds).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+// Sublabel under the big percentage: shows your real tracking span, noting your
+// start date when you began part-way through the month or year.
+function spanSublabel(stats) {
+  const days = stats.daysCounted + (stats.daysCounted === 1 ? ' day' : ' days');
+  if (stats.partialStart && stats.activeStart)
+    return 'overall consistency · since you started ' + niceDate(stats.activeStart)
+      + ' (' + days + ') · benchmark ' + BENCHMARK + '%';
+  return 'overall consistency · ' + days + ' counted · benchmark ' + BENCHMARK + '%';
+}
 function summaryBlock(overall, sublabel) {
   const grade = gradeFor(overall);
   return '<div class="report-summary">'
@@ -1019,7 +1040,7 @@ function monthReportHTML(y, m) {
   const stats = monthStats(y, m);
   if (!stats || !stats.perHabit.length) return '<div class="empty">No data for this month.</div>';
   const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
-  let html = summaryBlock(overall, 'overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%');
+  let html = summaryBlock(overall, spanSublabel(stats));
 
   const lastDay = new Date(y, m + 1, 0).getDate();
   html += '<div class="heat">';
@@ -1043,7 +1064,7 @@ function yearReportHTML(year) {
   const stats = yearStats(year);
   if (!stats || !stats.perHabit.length) return '<div class="empty">No data for this year.</div>';
   const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
-  let html = summaryBlock(overall, 'overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%');
+  let html = summaryBlock(overall, spanSublabel(stats));
 
   html += '<div class="section-label">Month by month</div>';
   html += '<div class="ybars">';
