@@ -147,6 +147,11 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     padding: 9px 16px; font-size: 14px; cursor: pointer; color: var(--text);
   }
+  .btn-danger {
+    background: #fff; border: 1px solid #e7b3b1; border-radius: 10px;
+    padding: 9px 16px; font-size: 14px; cursor: pointer; color: var(--danger); font-weight: 600;
+  }
+  .btn-danger:hover { background: #fbeaea; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 
   /* Setup card */
@@ -328,6 +333,10 @@
         <input type="file" id="restoreFile" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)">
       </div>
       <p class="hint">A backup is a single JSON file with every habit and check-in. Restoring merges it with your current data (newer wins), then re-syncs to GitHub.</p>
+      <div style="margin-top:14px; border-top:1px solid var(--border); padding-top:14px">
+        <button class="btn-danger" onclick="resetTracker()">↺ Reset &amp; start fresh from today</button>
+        <p class="hint">Erases all habits and check-ins on every device and restores the default starter habits, dated today. You'll be offered a backup first. This can't be undone.</p>
+      </div>
     </div>
 
     <div style="margin-top:24px">
@@ -520,6 +529,20 @@ function restoreBackup(ev) {
     ev.target.value = '';
   };
   reader.readAsText(file);
+}
+// Wipe everything and restore the default starter habits, all dated today.
+function resetTracker() {
+  if (!confirm('Reset the tracker?\n\nThis permanently erases ALL habits and check-ins on every device and restores the default starter habits, dated today. This cannot be undone.')) return;
+  if (confirm('Download a backup of your current data first? (recommended)')) exportBackup();
+  state = freshState();          // default habits, created today, no checks
+  migrateState(state);           // give each a frequency history starting today
+  viewDate = new Date();
+  reportMonth = new Date(); reportMonth.setDate(1);
+  reportYear = new Date().getFullYear();
+  document.getElementById('monthBanner').style.display = 'none';
+  persist();
+  showView('today');
+  setStatus('✓ Reset — fresh start from today', 'ok');
 }
 // Merge two states: union of habits (by id), union of checks per day; if both edited, newer state's fields win.
 function mergeStates(a, b) {
