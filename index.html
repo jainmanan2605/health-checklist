@@ -317,7 +317,7 @@
       <button class="btn-primary" onclick="addHabit()">Add</button>
     </div>
     <div class="freq-line" id="newFreqLine"></div>
-    <p class="hint">Drag the ⠿ handle to reorder habits — the order is saved and used on the Today screen too. Rename habits by typing directly in the box. Each habit can be daily, a weekly target (e.g. 3×/week), or tied to specific weekdays. Deleting a habit keeps its past history in old reports.</p>
+    <p class="hint">Drag the ⠿ handle to reorder habits — the order is saved and used on the Today screen too. Rename habits by typing directly in the box. Each habit can be daily, a weekly target (e.g. 3×/week), or tied to specific weekdays. Changing a habit's frequency only applies from today forward — past months and years keep the schedule they were actually measured against. Deleting a habit keeps its past history in old reports.</p>
 
     <div class="section-label">Backup &amp; safety</div>
     <div class="setup-card" style="padding:16px">
@@ -510,6 +510,7 @@ function restoreBackup(ev) {
         ev.target.value = ''; return;
       }
       state = mergeStates(state, data);
+      migrateState(state);
       persist();
       showView(currentView);
       setStatus('✓ Backup restored', 'ok');
@@ -575,9 +576,47 @@ function activeHabitsOn(dateStr) {
   return state.habits.filter(h => h.created <= dateStr && (!h.deleted || h.deleted > dateStr));
 }
 const DAY_LABELS = ['S','M','T','W','T','F','S'];
-function getFreq(h) { return h.freq || { type: 'daily' }; }
+function normFreq(f) { return (!f || f.type === 'daily') ? { type: 'daily' } : f; }
+// Effective frequency on a given date, using the habit's dated history.
+function getFreqOn(h, dateStr) {
+  const hist = h.freqHistory;
+  if (!hist || !hist.length) return normFreq(h.freq);
+  let cur = hist[0].freq;
+  for (const seg of hist) { if (seg.from <= dateStr) cur = seg.freq; else break; }
+  return normFreq(cur);
+}
+// Current (latest) frequency — used by editing UI and "today" displays.
+function getFreq(h) {
+  if (h.freqHistory && h.freqHistory.length) return normFreq(h.freqHistory[h.freqHistory.length - 1].freq);
+  return normFreq(h.freq);
+}
+// Ensure every habit has a dated frequency history (one-time migration of old data).
+function migrateHabit(h) {
+  if (!Array.isArray(h.freqHistory) || !h.freqHistory.length) {
+    h.freqHistory = [{ from: h.created || '2000-01-01', freq: normFreq(h.freq) }];
+  }
+  h.freqHistory.sort((a, b) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+  const latest = h.freqHistory[h.freqHistory.length - 1].freq;
+  h.freq = latest && latest.type !== 'daily' ? latest : null; // mirror for older app versions
+}
+function migrateState(s) { if (s && Array.isArray(s.habits)) s.habits.forEach(migrateHabit); }
+// Record a frequency change effective from today, leaving past segments untouched.
+function setHabitFreq(h, f) {
+  const nf = normFreq(f);
+  if (!Array.isArray(h.freqHistory) || !h.freqHistory.length) migrateHabit(h);
+  const today = todayStr();
+  const last = h.freqHistory[h.freqHistory.length - 1];
+  if (last.from === today) last.freq = nf;
+  else h.freqHistory.push({ from: today, freq: nf });
+  // collapse a no-op change so history stays clean
+  if (h.freqHistory.length >= 2) {
+    const a = h.freqHistory[h.freqHistory.length - 2], b = h.freqHistory[h.freqHistory.length - 1];
+    if (JSON.stringify(a.freq) === JSON.stringify(b.freq)) h.freqHistory.pop();
+  }
+  h.freq = nf.type !== 'daily' ? nf : null;
+}
 function visibleOn(h, dateObj) {
-  const f = getFreq(h);
+  const f = getFreqOn(h, fmt(dateObj));
   if (f.type === 'days') return (f.days || []).includes(dateObj.getDay());
   return true;
 }
@@ -603,9 +642,9 @@ function toggle(dateStr, id) {
   persist(); renderToday();
 }
 function streak(h) {
-  const f = getFreq(h);
-  if (f.type === 'weekly') return 0; // weekly habits show a week badge instead
-  const sched = dt => f.type !== 'days' || (f.days || []).includes(dt.getDay());
+  if (getFreq(h).type === 'weekly') return 0; // weekly habits show a week badge instead
+  // scheduled status uses the frequency that was effective on each day
+  const sched = dt => { const f = getFreqOn(h, fmt(dt)); return f.type !== 'days' || (f.days || []).includes(dt.getDay()); };
   let d = new Date(), count = 0;
   if (sched(d) && !isChecked(fmt(d), h.id)) d.setDate(d.getDate() - 1); // today pending doesn't break it
   for (let i = 0; i < 730; i++) {
@@ -687,7 +726,7 @@ function renderToday() {
   list.innerHTML = '';
   habits.forEach(h => {
     const done = isChecked(ds, h.id);
-    const f = getFreq(h);
+    const f = getFreqOn(h, ds);
     const el = document.createElement('div');
     el.className = 'task' + (done ? ' done' : '');
     el.dataset.id = h.id;
@@ -805,7 +844,7 @@ function renderManage() {
     };
     line.appendChild(grip); line.appendChild(inp); line.appendChild(del);
     row.appendChild(line);
-    row.appendChild(buildFreqControls(getFreq(h), f => { h.freq = f.type === 'daily' ? null : f; persist(); }));
+    row.appendChild(buildFreqControls(getFreq(h), f => { setHabitFreq(h, f); persist(); }));
     box.appendChild(row);
   });
   if (!state.habits.filter(h => !h.deleted).length)
@@ -822,9 +861,11 @@ function addHabit() {
   const inp = document.getElementById('newHabitInput');
   const name = inp.value.trim();
   if (!name) return;
+  const created = todayStr();
   state.habits.push({
-    id: uid(), name, created: todayStr(), deleted: null,
-    freq: newHabitFreq.type === 'daily' ? null : newHabitFreq
+    id: uid(), name, created, deleted: null,
+    freq: newHabitFreq.type === 'daily' ? null : newHabitFreq,
+    freqHistory: [{ from: created, freq: normFreq(newHabitFreq) }]
   });
   inp.value = '';
   persist(); renderManage();
@@ -832,34 +873,34 @@ function addHabit() {
 
 // ================= STATS (shared by month + year) =================
 function habitRangeStats(h, first, end) {
-  const f = getFreq(h);
-  let activeDays = 0, scheduledDays = 0, doneScheduled = 0, doneAny = 0;
+  // Walk day by day using the frequency that was effective on each day, so a
+  // frequency change part-way through a period only affects the days after it.
+  let activeDays = 0, done = 0, expected = 0;
+  const sigs = new Set();
+  let lastType = 'daily', lastTarget = 3;
   for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
     const ds = fmt(d);
-    if (h.created <= ds && (!h.deleted || h.deleted > ds)) {
-      activeDays++;
-      if (isChecked(ds, h.id)) doneAny++;
-      if (visibleOn(h, d)) {
-        scheduledDays++;
-        if (isChecked(ds, h.id)) doneScheduled++;
-      }
-    }
+    if (!(h.created <= ds && (!h.deleted || h.deleted > ds))) continue;
+    activeDays++;
+    const f = getFreqOn(h, ds);
+    sigs.add(JSON.stringify(f));
+    lastType = f.type; if (f.type === 'weekly') lastTarget = f.target;
+    const checked = isChecked(ds, h.id);
+    if (f.type === 'weekly') { expected += f.target / 7; if (checked) done++; }
+    else if (f.type === 'days') { if ((f.days || []).includes(d.getDay())) { expected++; if (checked) done++; } }
+    else { expected++; if (checked) done++; }
   }
-  if (!activeDays) return null;
-  let pct, note;
-  if (f.type === 'weekly') {
-    const expected = f.target * activeDays / 7;
-    if (expected <= 0) return null;
-    pct = Math.min(100, Math.round(doneAny / expected * 100));
-    note = doneAny + ' of ~' + Math.round(expected) + ' (target ' + f.target + '×/week)';
-  } else if (f.type === 'days') {
-    if (!scheduledDays) return null;
-    pct = Math.round(doneScheduled / scheduledDays * 100);
-    note = doneScheduled + ' of ' + scheduledDays + ' scheduled days';
+  if (!activeDays || expected <= 0) return null;
+  const pct = Math.min(100, Math.round(done / expected * 100));
+  let note;
+  if (sigs.size > 1) {
+    note = done + ' of ~' + Math.round(expected) + ' expected (schedule changed this period)';
+  } else if (lastType === 'weekly') {
+    note = done + ' of ~' + Math.round(expected) + ' (target ' + lastTarget + '×/week)';
+  } else if (lastType === 'days') {
+    note = done + ' of ' + Math.round(expected) + ' scheduled days';
   } else {
-    if (!scheduledDays) return null;
-    pct = Math.round(doneScheduled / scheduledDays * 100);
-    note = doneScheduled + ' of ' + scheduledDays + ' days';
+    note = done + ' of ' + Math.round(expected) + ' days';
   }
   return { name: h.name, pct, note };
 }
@@ -1140,6 +1181,7 @@ function openLastMonthReport() {
 
 // ================= INIT =================
 function enterApp() {
+  migrateState(state);
   document.getElementById('headerBtns').style.display = 'flex';
   showView('today');
   checkMonthBanner();
@@ -1156,6 +1198,7 @@ async function init() {
     const remote = await pullRemote();
     if ((remote.updatedAt || 0) > (state.updatedAt || 0)) {
       state = remote;
+      migrateState(state);
       cacheSave();
       showView(currentView);
       checkMonthBanner();
