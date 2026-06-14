@@ -63,10 +63,10 @@
 
   /* Checklist */
   .task {
-    display: flex; align-items: center; gap: 14px;
+    display: flex; align-items: center; gap: 12px;
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 14px 16px; margin-bottom: 8px; cursor: pointer;
-    transition: border-color .15s, opacity .2s; user-select: none;
+    transition: border-color .15s, opacity .2s, box-shadow .1s; user-select: none;
   }
   .task:hover { border-color: var(--accent); }
   .task .checkbox {
@@ -78,6 +78,17 @@
   .task .name { font-size: 15px; flex: 1; }
   .task.done .name { color: var(--muted); text-decoration: line-through; }
   .task .streak { font-size: 12px; color: var(--warn); white-space: nowrap; }
+
+  /* Drag handle + states */
+  .grip {
+    cursor: grab; color: #c4c4c0; font-size: 17px; line-height: 1;
+    padding: 4px 2px; touch-action: none; user-select: none; min-width: 16px; text-align: center;
+  }
+  .grip:active { cursor: grabbing; }
+  .grip:hover { color: var(--accent); }
+  .dragging { opacity: 0.4; }
+  .drag-over-top { box-shadow: inset 0 3px 0 var(--accent); }
+  .drag-over-bottom { box-shadow: inset 0 -3px 0 var(--accent); }
 
   .all-done { text-align: center; padding: 14px; color: var(--accent); font-weight: 600; font-size: 14px; display: none; }
   .empty { text-align: center; color: var(--muted); padding: 40px 0; font-size: 14px; }
@@ -131,6 +142,7 @@
     padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .btn-primary:hover { filter: brightness(1.05); }
+  .btn-primary:disabled { opacity: 0.6; cursor: default; }
   .btn-secondary {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     padding: 9px 16px; font-size: 14px; cursor: pointer; color: var(--text);
@@ -149,6 +161,14 @@
   .setup-err { color: var(--danger); font-size: 13px; margin-top: 10px; display: none; }
 
   /* Report */
+  .report-mode { display: flex; gap: 0; margin-bottom: 14px; border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; background: var(--card); }
+  .report-mode .seg {
+    flex: 1; background: none; border: none; padding: 9px 0; cursor: pointer;
+    font-size: 14px; font-weight: 600; color: var(--muted);
+  }
+  .report-mode .seg.active { background: var(--accent); color: #fff; }
+
   .month-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .month-nav button {
     background: var(--card); border: 1px solid var(--border); border-radius: 8px;
@@ -156,6 +176,9 @@
   }
   .month-nav button:disabled { opacity: 0.25; cursor: default; }
   .month-title { font-weight: 600; font-size: 15px; }
+
+  .share-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .share-row button { flex: 1; }
 
   .report-summary {
     background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
@@ -179,6 +202,19 @@
   .ok { color: var(--warn); } .bg-ok { background: var(--warn); }
   .bad { color: var(--danger); } .bg-bad { background: var(--danger); }
 
+  .section-label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 18px 0 10px; }
+
+  /* Yearly month bars */
+  .ybars { display: flex; align-items: flex-end; gap: 6px; background: var(--card);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 12px; margin-bottom: 6px; }
+  .ybar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+  .ybar-track { width: 100%; height: 90px; background: var(--border); border-radius: 6px;
+    display: flex; align-items: flex-end; overflow: hidden; }
+  .ybar-fill { width: 100%; border-radius: 6px 6px 0 0; transition: height .3s; }
+  .ybar-mlabel { font-size: 10px; color: var(--muted); }
+  .ybar-pct { font-size: 10px; font-weight: 600; }
+
   .improve-box {
     background: #fdf6ec; border: 1px solid #f3e2c4; border-radius: var(--radius);
     padding: 14px 16px; margin-top: 14px; font-size: 14px; line-height: 1.6;
@@ -200,6 +236,9 @@
   .heat .cell.l1 { background: #cdeadb; } .heat .cell.l2 { background: #8fd0ae; color:#fff; }
   .heat .cell.l3 { background: var(--accent); color: #fff; }
   .heat .cell.today-cell { outline: 2px solid var(--text); }
+
+  /* Off-screen container used for PDF rendering */
+  #pdfStage { position: fixed; left: -10000px; top: 0; width: 540px; background: #fff; }
 </style>
 </head>
 <body>
@@ -253,10 +292,18 @@
 
   <!-- REPORT VIEW -->
   <div class="view" id="view-report">
+    <div class="report-mode">
+      <button class="seg active" id="segMonth" onclick="setReportMode('month')">Monthly</button>
+      <button class="seg" id="segYear" onclick="setReportMode('year')">Yearly</button>
+    </div>
     <div class="month-nav">
-      <button onclick="changeMonth(-1)">‹ Prev</button>
-      <div class="month-title" id="monthTitle"></div>
-      <button id="nextMonth" onclick="changeMonth(1)">Next ›</button>
+      <button id="prevPeriod" onclick="changePeriod(-1)">‹ Prev</button>
+      <div class="month-title" id="periodTitle"></div>
+      <button id="nextPeriod" onclick="changePeriod(1)">Next ›</button>
+    </div>
+    <div class="share-row">
+      <button class="btn-primary" id="shareBtn" onclick="exportReport('share')">📤 Share</button>
+      <button class="btn-secondary" id="dlBtn" onclick="exportReport('download')">⬇ PDF</button>
     </div>
     <div id="reportBody"></div>
   </div>
@@ -270,12 +317,26 @@
       <button class="btn-primary" onclick="addHabit()">Add</button>
     </div>
     <div class="freq-line" id="newFreqLine"></div>
-    <p class="hint">Rename habits by typing directly in the box. Each habit can be daily, a weekly target (e.g. 3×/week), or tied to specific weekdays. Deleting a habit keeps its past history in old reports.</p>
+    <p class="hint">Drag the ⠿ handle to reorder habits — the order is saved and used on the Today screen too. Rename habits by typing directly in the box. Each habit can be daily, a weekly target (e.g. 3×/week), or tied to specific weekdays. Deleting a habit keeps its past history in old reports.</p>
+
+    <div class="section-label">Backup &amp; safety</div>
+    <div class="setup-card" style="padding:16px">
+      <p style="font-size:13px;line-height:1.6">Your data lives in a <strong>private GitHub Gist</strong> in your own account and is cached on this device, so it is safe and syncs everywhere. For extra peace of mind you can keep an offline copy:</p>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <button class="btn-secondary" onclick="exportBackup()">⬇ Download backup (.json)</button>
+        <button class="btn-secondary" onclick="document.getElementById('restoreFile').click()">⬆ Restore from backup</button>
+        <input type="file" id="restoreFile" accept="application/json,.json" style="display:none" onchange="restoreBackup(event)">
+      </div>
+      <p class="hint">A backup is a single JSON file with every habit and check-in. Restoring merges it with your current data (newer wins), then re-syncs to GitHub.</p>
+    </div>
+
     <div style="margin-top:24px">
       <button class="btn-secondary" onclick="disconnect()">Disconnect GitHub on this device</button>
     </div>
   </div>
 </div>
+
+<div id="pdfStage"></div>
 
 <script>
 // ================= CONFIG =================
@@ -285,6 +346,8 @@ const GIST_DESC = 'Daily Health Checklist data (auto-managed)';
 const LS_TOKEN = 'healthChecklist.token';
 const LS_GIST = 'healthChecklist.gistId';
 const LS_CACHE = 'healthChecklist.cache.v2';
+const PDF_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js';
+const PDF_LIB_FALLBACK = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js';
 const DEFAULT_HABITS = [
   'Apply minoxidil', 'Vitamin D supplement', 'Vitamin B12 supplement',
   'Exercise', 'Eat protein', 'Eat chia', 'Sleep before 10:30 PM'
@@ -424,6 +487,65 @@ function disconnect() {
   location.reload();
 }
 
+// ================= BACKUP / RESTORE =================
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'health-checklist-backup-' + todayStr() + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function restoreBackup(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || !Array.isArray(data.habits) || typeof data.checks !== 'object')
+        throw new Error('Not a valid backup file.');
+      if (!confirm('Restore this backup? It will be merged with your current data (newer entries win), then synced to GitHub.')) {
+        ev.target.value = ''; return;
+      }
+      state = mergeStates(state, data);
+      persist();
+      showView(currentView);
+      setStatus('✓ Backup restored', 'ok');
+    } catch (e) {
+      alert('Could not restore: ' + (e.message || 'invalid file'));
+    }
+    ev.target.value = '';
+  };
+  reader.readAsText(file);
+}
+// Merge two states: union of habits (by id), union of checks per day; if both edited, newer state's fields win.
+function mergeStates(a, b) {
+  const newer = (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a;
+  const older = newer === b ? a : b;
+  const habitsById = {};
+  older.habits.forEach(h => habitsById[h.id] = { ...h });
+  newer.habits.forEach(h => habitsById[h.id] = { ...habitsById[h.id], ...h });
+  // preserve newer's ordering, then append any older-only habits
+  const ordered = [];
+  const seen = new Set();
+  newer.habits.forEach(h => { ordered.push(habitsById[h.id]); seen.add(h.id); });
+  older.habits.forEach(h => { if (!seen.has(h.id)) { ordered.push(habitsById[h.id]); seen.add(h.id); } });
+  const checks = {};
+  const allDays = new Set([...Object.keys(a.checks || {}), ...Object.keys(b.checks || {})]);
+  allDays.forEach(d => {
+    const merged = new Set([...(a.checks[d] || []), ...(b.checks[d] || [])]);
+    if (merged.size) checks[d] = [...merged];
+  });
+  return {
+    habits: ordered,
+    checks,
+    lastSeenReport: newer.lastSeenReport || older.lastSeenReport,
+    updatedAt: Date.now()
+  };
+}
+
 // ================= DATES =================
 function fmt(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function todayStr() { return fmt(new Date()); }
@@ -431,6 +553,8 @@ function monthStr(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).pad
 
 let viewDate = new Date();
 let reportMonth = new Date(); reportMonth.setDate(1);
+let reportMode = 'month';
+let reportYear = new Date().getFullYear();
 
 // ================= VIEWS =================
 function showView(v) {
@@ -493,6 +617,62 @@ function streak(h) {
   return count;
 }
 
+// ================= DRAG TO REORDER =================
+// Move habit dragId to before/after targetId in the master order.
+function reorderHabits(dragId, targetId, place) {
+  const arr = state.habits;
+  const from = arr.findIndex(h => h.id === dragId);
+  if (from < 0 || dragId === targetId) return;
+  const [item] = arr.splice(from, 1);
+  let to = arr.findIndex(h => h.id === targetId);
+  if (to < 0) { arr.push(item); }
+  else { if (place === 'after') to++; arr.splice(to, 0, item); }
+  persist();
+}
+// Attach pointer-based sortable behaviour to rows (with .grip) inside container.
+function makeSortable(container, onDone) {
+  container.querySelectorAll('.grip').forEach(grip => {
+    grip.addEventListener('click', e => e.stopPropagation());
+    grip.addEventListener('pointerdown', startDrag);
+  });
+  function startDrag(e) {
+    e.preventDefault();
+    const row = e.target.closest('[data-id]');
+    if (!row) return;
+    const dragId = row.dataset.id;
+    row.classList.add('dragging');
+    let targetId = null, place = 'after';
+    function clearMarks() {
+      container.querySelectorAll('[data-id]').forEach(r => r.classList.remove('drag-over-top','drag-over-bottom'));
+    }
+    function onMove(ev) {
+      const y = ev.clientY;
+      clearMarks();
+      const rows = [...container.querySelectorAll('[data-id]')].filter(r => r !== row);
+      let placed = false;
+      for (const r of rows) {
+        const rect = r.getBoundingClientRect();
+        if (y < rect.top + rect.height / 2) {
+          r.classList.add('drag-over-top'); targetId = r.dataset.id; place = 'before'; placed = true; break;
+        }
+      }
+      if (!placed && rows.length) {
+        const last = rows[rows.length - 1];
+        last.classList.add('drag-over-bottom'); targetId = last.dataset.id; place = 'after';
+      }
+    }
+    function onUp() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      row.classList.remove('dragging');
+      clearMarks();
+      if (targetId && targetId !== dragId) { reorderHabits(dragId, targetId, place); onDone(); }
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+}
+
 // ================= TODAY =================
 function renderToday() {
   const ds = fmt(viewDate);
@@ -510,6 +690,7 @@ function renderToday() {
     const f = getFreq(h);
     const el = document.createElement('div');
     el.className = 'task' + (done ? ' done' : '');
+    el.dataset.id = h.id;
     let extra = '';
     if (f.type === 'weekly') {
       const wk = weekChecks(h, viewDate);
@@ -518,13 +699,15 @@ function renderToday() {
       const st = streak(h);
       if (st >= 2) extra = '<div class="streak">🔥 ' + st + (f.type === 'days' ? '×' : 'd') + '</div>';
     }
-    el.innerHTML = '<div class="checkbox">' + (done ? '✓' : '') + '</div>'
+    el.innerHTML = '<div class="grip" title="Drag to reorder">⠿</div>'
+      + '<div class="checkbox">' + (done ? '✓' : '') + '</div>'
       + '<div class="name"></div>' + extra;
     el.querySelector('.name').textContent = h.name;
     el.onclick = () => toggle(ds, h.id);
     list.appendChild(el);
   });
   if (!habits.length) list.innerHTML = '<div class="empty">No habits yet — add some in Edit.</div>';
+  makeSortable(list, renderToday);
 
   const done = habits.filter(h => isChecked(ds, h.id)).length;
   const pct = habits.length ? Math.round(done / habits.length * 100) : 0;
@@ -605,8 +788,11 @@ function renderManage() {
   state.habits.filter(h => !h.deleted).forEach(h => {
     const row = document.createElement('div');
     row.className = 'habit-row';
+    row.dataset.id = h.id;
     const line = document.createElement('div');
     line.className = 'name-line';
+    const grip = document.createElement('div');
+    grip.className = 'grip'; grip.title = 'Drag to reorder'; grip.textContent = '⠿';
     const inp = document.createElement('input');
     inp.type = 'text'; inp.value = h.name;
     inp.onchange = () => { h.name = inp.value.trim() || h.name; inp.value = h.name; persist(); };
@@ -617,13 +803,14 @@ function renderManage() {
         h.deleted = todayStr(); persist(); renderManage();
       }
     };
-    line.appendChild(inp); line.appendChild(del);
+    line.appendChild(grip); line.appendChild(inp); line.appendChild(del);
     row.appendChild(line);
     row.appendChild(buildFreqControls(getFreq(h), f => { h.freq = f.type === 'daily' ? null : f; persist(); }));
     box.appendChild(row);
   });
   if (!state.habits.filter(h => !h.deleted).length)
     box.innerHTML = '<div class="empty">No habits yet.</div>';
+  makeSortable(box, renderManage);
   // frequency picker for the add-new row
   const nf = document.getElementById('newFreqLine');
   nf.innerHTML = '';
@@ -643,74 +830,155 @@ function addHabit() {
   persist(); renderManage();
 }
 
-// ================= REPORT =================
-function monthStats(year, month) {
-  const first = new Date(year, month, 1);
-  const today = new Date();
-  const lastDay = new Date(year, month + 1, 0);
-  const end = (fmt(lastDay) >= todayStr()) ? today : lastDay;
-  if (fmt(first) > todayStr()) return null;
-
-  const perHabit = [];
-  state.habits.forEach(h => {
-    const f = getFreq(h);
-    let activeDays = 0, scheduledDays = 0, doneScheduled = 0, doneAny = 0;
-    for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
-      const ds = fmt(d);
-      if (h.created <= ds && (!h.deleted || h.deleted > ds)) {
-        activeDays++;
-        if (isChecked(ds, h.id)) doneAny++;
-        if (visibleOn(h, d)) {
-          scheduledDays++;
-          if (isChecked(ds, h.id)) doneScheduled++;
-        }
+// ================= STATS (shared by month + year) =================
+function habitRangeStats(h, first, end) {
+  const f = getFreq(h);
+  let activeDays = 0, scheduledDays = 0, doneScheduled = 0, doneAny = 0;
+  for (let d = new Date(first); fmt(d) <= fmt(end); d.setDate(d.getDate() + 1)) {
+    const ds = fmt(d);
+    if (h.created <= ds && (!h.deleted || h.deleted > ds)) {
+      activeDays++;
+      if (isChecked(ds, h.id)) doneAny++;
+      if (visibleOn(h, d)) {
+        scheduledDays++;
+        if (isChecked(ds, h.id)) doneScheduled++;
       }
     }
-    if (!activeDays) return;
-    let pct, note;
-    if (f.type === 'weekly') {
-      const expected = f.target * activeDays / 7;
-      if (expected <= 0) return;
-      pct = Math.min(100, Math.round(doneAny / expected * 100));
-      note = doneAny + ' of ~' + Math.round(expected) + ' (target ' + f.target + '×/week)';
-    } else if (f.type === 'days') {
-      if (!scheduledDays) return;
-      pct = Math.round(doneScheduled / scheduledDays * 100);
-      note = doneScheduled + ' of ' + scheduledDays + ' scheduled days';
-    } else {
-      pct = Math.round(doneScheduled / scheduledDays * 100);
-      note = doneScheduled + ' of ' + scheduledDays + ' days';
-    }
-    perHabit.push({ name: h.name, pct, note });
+  }
+  if (!activeDays) return null;
+  let pct, note;
+  if (f.type === 'weekly') {
+    const expected = f.target * activeDays / 7;
+    if (expected <= 0) return null;
+    pct = Math.min(100, Math.round(doneAny / expected * 100));
+    note = doneAny + ' of ~' + Math.round(expected) + ' (target ' + f.target + '×/week)';
+  } else if (f.type === 'days') {
+    if (!scheduledDays) return null;
+    pct = Math.round(doneScheduled / scheduledDays * 100);
+    note = doneScheduled + ' of ' + scheduledDays + ' scheduled days';
+  } else {
+    if (!scheduledDays) return null;
+    pct = Math.round(doneScheduled / scheduledDays * 100);
+    note = doneScheduled + ' of ' + scheduledDays + ' days';
+  }
+  return { name: h.name, pct, note };
+}
+
+function rangeStats(first, end) {
+  if (fmt(first) > todayStr()) return null;
+  const perHabit = [];
+  state.habits.forEach(h => {
+    const s = habitRangeStats(h, first, end);
+    if (s) perHabit.push(s);
   });
   const daysCounted = Math.round((end - first) / 86400000) + 1;
   return { perHabit, daysCounted };
 }
 
-function renderReport() {
-  const y = reportMonth.getFullYear(), m = reportMonth.getMonth();
-  document.getElementById('monthTitle').textContent =
-    reportMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const now = new Date();
-  document.getElementById('nextMonth').disabled = (y === now.getFullYear() && m === now.getMonth());
+function monthStats(year, month) {
+  const first = new Date(year, month, 1);
+  const today = new Date();
+  const lastDay = new Date(year, month + 1, 0);
+  const end = (fmt(lastDay) >= todayStr()) ? today : lastDay;
+  return rangeStats(first, end);
+}
 
-  const body = document.getElementById('reportBody');
-  const stats = monthStats(y, m);
-  if (!stats || !stats.perHabit.length) {
-    body.innerHTML = '<div class="empty">No data for this month.</div>';
-    return;
+function yearStats(year) {
+  const first = new Date(year, 0, 1);
+  const today = new Date();
+  const lastDay = new Date(year, 11, 31);
+  const end = (fmt(lastDay) >= todayStr()) ? today : lastDay;
+  const base = rangeStats(first, end);
+  if (!base) return null;
+  const months = [];
+  for (let m = 0; m < 12; m++) {
+    const ms = monthStats(year, m);
+    if (!ms || !ms.perHabit.length) { months.push(null); continue; }
+    months.push(Math.round(ms.perHabit.reduce((s, x) => s + x.pct, 0) / ms.perHabit.length));
   }
+  return { ...base, months };
+}
 
-  const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
-  const grade = overall >= 90 ? ['Outstanding consistency! 🏆', 'good']
-              : overall >= BENCHMARK ? ['Solid month — above your ' + BENCHMARK + '% benchmark 💪', 'good']
-              : overall >= 50 ? ['Below your ' + BENCHMARK + '% benchmark — room to grow 🌿', 'ok']
-              : ['Tough month — fresh start ahead 🌅', 'bad'];
+// earliest year/month that has any data (for nav bounds)
+function earliestDataDate() {
+  let earliest = null;
+  state.habits.forEach(h => { if (!earliest || h.created < earliest) earliest = h.created; });
+  Object.keys(state.checks || {}).forEach(d => { if (!earliest || d < earliest) earliest = d; });
+  return earliest ? parseDateStr(earliest) : new Date();
+}
 
-  let html = '<div class="report-summary">'
+// ================= REPORT =================
+function setReportMode(mode) {
+  reportMode = mode;
+  document.getElementById('segMonth').classList.toggle('active', mode === 'month');
+  document.getElementById('segYear').classList.toggle('active', mode === 'year');
+  renderReport();
+}
+function changePeriod(delta) {
+  if (reportMode === 'month') { reportMonth.setMonth(reportMonth.getMonth() + delta); }
+  else { reportYear += delta; }
+  renderReport();
+}
+function gradeFor(overall) {
+  return overall >= 90 ? ['Outstanding consistency! 🏆', 'good']
+       : overall >= BENCHMARK ? ['Solid — above your ' + BENCHMARK + '% benchmark 💪', 'good']
+       : overall >= 50 ? ['Below your ' + BENCHMARK + '% benchmark — room to grow 🌿', 'ok']
+       : ['Tough stretch — fresh start ahead 🌅', 'bad'];
+}
+
+function renderReport() {
+  const now = new Date();
+  const earliest = earliestDataDate();
+  if (reportMode === 'month') {
+    const y = reportMonth.getFullYear(), m = reportMonth.getMonth();
+    document.getElementById('periodTitle').textContent =
+      reportMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    document.getElementById('nextPeriod').disabled = (y === now.getFullYear() && m === now.getMonth());
+    document.getElementById('prevPeriod').disabled =
+      (y < earliest.getFullYear() || (y === earliest.getFullYear() && m <= earliest.getMonth()));
+    document.getElementById('reportBody').innerHTML = monthReportHTML(y, m);
+  } else {
+    document.getElementById('periodTitle').textContent = String(reportYear);
+    document.getElementById('nextPeriod').disabled = (reportYear >= now.getFullYear());
+    document.getElementById('prevPeriod').disabled = (reportYear <= earliest.getFullYear());
+    document.getElementById('reportBody').innerHTML = yearReportHTML(reportYear);
+  }
+}
+
+function summaryBlock(overall, sublabel) {
+  const grade = gradeFor(overall);
+  return '<div class="report-summary">'
     + '<div class="big-pct">' + overall + '%</div>'
-    + '<div class="label">overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%</div>'
+    + '<div class="label">' + sublabel + '</div>'
     + '<div class="report-grade ' + grade[1] + '">' + grade[0] + '</div></div>';
+}
+function habitListHTML(perHabit) {
+  const sorted = [...perHabit].sort((a, b) => b.pct - a.pct);
+  let html = '';
+  sorted.forEach(h => {
+    const cls = h.pct >= BENCHMARK ? 'good' : h.pct >= 50 ? 'ok' : 'bad';
+    html += '<div class="report-item"><div class="top">'
+      + '<span class="rname">' + esc(h.name) + '</span>'
+      + '<span class="rpct ' + cls + '">' + h.pct + '%</span></div>'
+      + '<div class="bar"><div class="bg-' + cls + '" style="width:' + h.pct + '%"></div></div>'
+      + '<div class="note">' + esc(h.note) + '</div></div>';
+  });
+  const weak = sorted.filter(h => h.pct < BENCHMARK);
+  if (weak.length) {
+    html += '<div class="improve-box"><strong>⚠️ Below ' + BENCHMARK + '% — needs improvement</strong>'
+      + weak.map(h => esc(h.name) + ' (' + h.pct + '%)').join(', ')
+      + '. Try pairing these with a habit you already do consistently, or set a phone reminder.</div>';
+  } else {
+    html += '<div class="improve-box" style="background:var(--accent-light);border-color:#c8e6d6;"><strong>✅ Nothing flagged</strong>Every habit is at ' + BENCHMARK + '% or above. Excellent work!</div>';
+  }
+  return html;
+}
+
+function monthReportHTML(y, m) {
+  const stats = monthStats(y, m);
+  if (!stats || !stats.perHabit.length) return '<div class="empty">No data for this month.</div>';
+  const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
+  let html = summaryBlock(overall, 'overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%');
 
   const lastDay = new Date(y, m + 1, 0).getDate();
   html += '<div class="heat">';
@@ -725,32 +993,128 @@ function renderReport() {
     html += '<div class="cell ' + cls + (ds === todayStr() ? ' today-cell' : '') + '">' + day + '</div>';
   }
   html += '</div>';
+  html += '<div class="section-label">Per habit</div>';
+  html += habitListHTML(stats.perHabit);
+  return html;
+}
 
-  const sorted = [...stats.perHabit].sort((a, b) => b.pct - a.pct);
-  sorted.forEach(h => {
-    const cls = h.pct >= BENCHMARK ? 'good' : h.pct >= 50 ? 'ok' : 'bad';
-    html += '<div class="report-item"><div class="top">'
-      + '<span class="rname">' + esc(h.name) + '</span>'
-      + '<span class="rpct ' + cls + '">' + h.pct + '%</span></div>'
-      + '<div class="bar"><div class="bg-' + cls + '" style="width:' + h.pct + '%"></div></div>'
-      + '<div class="note">' + h.note + '</div></div>';
-  });
+function yearReportHTML(year) {
+  const stats = yearStats(year);
+  if (!stats || !stats.perHabit.length) return '<div class="empty">No data for this year.</div>';
+  const overall = Math.round(stats.perHabit.reduce((s, h) => s + h.pct, 0) / stats.perHabit.length);
+  let html = summaryBlock(overall, 'overall consistency · ' + stats.daysCounted + ' days counted · benchmark ' + BENCHMARK + '%');
 
-  const weak = sorted.filter(h => h.pct < BENCHMARK);
-  if (weak.length) {
-    html += '<div class="improve-box"><strong>⚠️ Below ' + BENCHMARK + '% — needs improvement</strong>'
-      + weak.map(h => esc(h.name) + ' (' + h.pct + '%)').join(', ')
-      + '. Try pairing these with a habit you already do consistently, or set a phone reminder.</div>';
-  } else {
-    html += '<div class="improve-box" style="background:var(--accent-light);border-color:#c8e6d6;"><strong>✅ Nothing flagged</strong>Every habit is at ' + BENCHMARK + '% or above. Excellent work!</div>';
+  html += '<div class="section-label">Month by month</div>';
+  html += '<div class="ybars">';
+  const MN = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+  for (let m = 0; m < 12; m++) {
+    const v = stats.months[m];
+    const cls = v == null ? '' : v >= BENCHMARK ? 'bg-good' : v >= 50 ? 'bg-ok' : 'bg-bad';
+    const h = v == null ? 0 : Math.max(4, v);
+    html += '<div class="ybar-col" onclick="jumpToMonth(' + year + ',' + m + ')">'
+      + '<div class="ybar-pct">' + (v == null ? '·' : v + '%') + '</div>'
+      + '<div class="ybar-track"><div class="ybar-fill ' + cls + '" style="height:' + h + '%"></div></div>'
+      + '<div class="ybar-mlabel">' + MN[m] + '</div></div>';
   }
-  body.innerHTML = html;
+  html += '</div><p class="hint" style="margin-top:0">Tap a month to open its detailed report.</p>';
+
+  html += '<div class="section-label">Per habit (whole year)</div>';
+  html += habitListHTML(stats.perHabit);
+  return html;
 }
-function changeMonth(delta) {
-  reportMonth.setMonth(reportMonth.getMonth() + delta);
-  renderReport();
+function jumpToMonth(y, m) {
+  reportMonth = new Date(y, m, 1);
+  setReportMode('month');
 }
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+
+// ================= PDF EXPORT + SHARE =================
+let pdfLibPromise = null;
+function loadPdfLib() {
+  if (window.html2pdf) return Promise.resolve();
+  if (pdfLibPromise) return pdfLibPromise;
+  pdfLibPromise = new Promise((resolve, reject) => {
+    const add = (src, onErr) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = () => resolve(); s.onerror = onErr; document.head.appendChild(s);
+    };
+    add(PDF_LIB, () => add(PDF_LIB_FALLBACK, () => reject(new Error('Could not load the PDF library — check your connection.'))));
+  });
+  return pdfLibPromise;
+}
+
+function reportTitle() {
+  if (reportMode === 'month')
+    return reportMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  return String(reportYear);
+}
+
+// Build a clean, white printable version of the current report.
+function buildPrintable() {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'padding:24px;background:#fff;color:#1a1a1a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  const title = reportTitle();
+  wrap.innerHTML =
+    '<div style="font-size:22px;font-weight:700;margin-bottom:2px;">🌱 Health Checklist</div>'
+    + '<div style="font-size:15px;color:#555;margin-bottom:16px;">'
+    + (reportMode === 'month' ? 'Monthly report' : 'Annual report') + ' — ' + esc(title) + '</div>'
+    + (reportMode === 'month' ? monthReportHTML(reportMonth.getFullYear(), reportMonth.getMonth())
+                              : yearReportHTML(reportYear));
+  return wrap;
+}
+
+async function exportReport(action) {
+  const shareBtn = document.getElementById('shareBtn');
+  const dlBtn = document.getElementById('dlBtn');
+  const label = action === 'share' ? shareBtn : dlBtn;
+  const orig = label.textContent;
+  label.disabled = true; shareBtn.disabled = true; dlBtn.disabled = true;
+  label.textContent = 'Preparing…';
+  try {
+    await loadPdfLib();
+    const stage = document.getElementById('pdfStage');
+    stage.innerHTML = '';
+    const printable = buildPrintable();
+    stage.appendChild(printable);
+
+    const fileName = 'health-' + (reportMode === 'month' ? 'monthly' : 'annual') + '-'
+      + (reportMode === 'month' ? monthStr(reportMonth) : reportYear) + '.pdf';
+
+    const opt = {
+      margin: [8, 8, 8, 8],
+      filename: fileName,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, backgroundColor: '#ffffff', useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'avoid-all'] }
+    };
+    const worker = window.html2pdf().set(opt).from(printable);
+    const blob = await worker.outputPdf('blob');
+    stage.innerHTML = '';
+
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    const shareText = '🌱 My Health Checklist — ' + (reportMode === 'month' ? 'Monthly' : 'Annual')
+      + ' report for ' + reportTitle();
+
+    if (action === 'share' && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: shareText, text: shareText });
+    } else {
+      if (action === 'share') setStatus('Sharing not supported here — downloaded the PDF instead.', '');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') { /* user cancelled share */ }
+    else alert(e.message || 'Could not generate the PDF.');
+  } finally {
+    label.textContent = orig;
+    shareBtn.disabled = false; dlBtn.disabled = false;
+  }
+}
 
 // ================= MONTH-END BANNER =================
 function checkMonthBanner() {
@@ -770,6 +1134,7 @@ function openLastMonthReport() {
   state.lastSeenReport = monthStr(reportMonth);
   persist();
   document.getElementById('monthBanner').style.display = 'none';
+  setReportMode('month');
   showView('report');
 }
 
